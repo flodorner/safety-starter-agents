@@ -289,7 +289,8 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
         mu, pi, logp_pi = actor_fn(x_ph, a_ph, **ac_kwargs)
         qr1, qr1_pi = critic_fn(x_ph, a_ph, pi, name='qr1', **ac_kwargs)
         qr2, qr2_pi = critic_fn(x_ph, a_ph, pi, name='qr2', **ac_kwargs)
-        qc, qc_pi = critic_fn(x_ph, a_ph, pi, name='qc', **ac_kwargs)
+        qc1, qc1_pi = critic_fn(x_ph, a_ph, pi, name='qc1', **ac_kwargs)
+        qc2, qc2_pi = critic_fn(x_ph, a_ph, pi, name='qc2', **ac_kwargs)
 
     with tf.variable_scope('main', reuse=True):
         # Additional policy output from a different observation placeholder
@@ -301,7 +302,8 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
     with tf.variable_scope('target'):
         _, qr1_pi_targ = critic_fn(x2_ph, a_ph, pi2, name='qr1', **ac_kwargs)
         _, qr2_pi_targ = critic_fn(x2_ph, a_ph, pi2, name='qr2', **ac_kwargs)
-        _, qc_pi_targ = critic_fn(x2_ph, a_ph, pi2, name='qc', **ac_kwargs)
+        _, qc1_pi_targ = critic_fn(x2_ph, a_ph, pi2, name='qc1', **ac_kwargs)
+        _, qc2_pi_targ = critic_fn(x2_ph, a_ph, pi2, name='qc2', **ac_kwargs)
 
     # Entropy bonus
     if fixed_entropy_bonus is None:
@@ -338,23 +340,27 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
     # Count variables
     if proc_id()==0:
         var_counts = tuple(count_vars(scope) for scope in 
-                           ['main/pi', 'main/qr1', 'main/qr2', 'main/qc', 'main'])
-        print(('\nNumber of parameters: \t pi: %d, \t qr1: %d, \t qr2: %d, \t qc: %d, \t total: %d\n')%var_counts)
+                           ['main/pi', 'main/qr1', 'main/qr2', 'main/qc1', 'main/qc2', 'main'])
+        print(('\nNumber of parameters: \t pi: %d, \t qr1: %d, \t qr2: %d, \t qc1: %d, \t qc2: %d, \t total: %d\n')%var_counts)
 
     # Min Double-Q:
     min_q_pi = tf.minimum(qr1_pi, qr2_pi)
     min_q_pi_targ = tf.minimum(qr1_pi_targ, qr2_pi_targ)
 
+    max_qc_pi = tf.maximum(qc1_pi, qc2_pi)
+    max_qc_pi_targ = tf.maximum(qc1_pi_targ, qc2_pi_targ)
+
     # Targets for Q and V regression
     q_backup = tf.stop_gradient(r_ph + gamma*(1-d_ph)*(min_q_pi_targ - alpha * logp_pi2))
-    qc_backup = tf.stop_gradient(c_ph + gamma*(1-d_ph)*qc_pi_targ)
+    qc_backup = tf.stop_gradient(c_ph + gamma*(1-d_ph)*max_qc_pi_targ)
 
     # Soft actor-critic losses
-    pi_loss = tf.reduce_mean(alpha * logp_pi - min_q_pi + beta * qc_pi)
+    pi_loss = tf.reduce_mean(alpha * logp_pi - min_q_pi + beta * max_qc_pi)
     qr1_loss = 0.5 * tf.reduce_mean((q_backup - qr1)**2)
     qr2_loss = 0.5 * tf.reduce_mean((q_backup - qr2)**2)
-    qc_loss = 0.5 * tf.reduce_mean((qc_backup - qc)**2)
-    q_loss = qr1_loss + qr2_loss + qc_loss
+    qc1_loss = 0.5 * tf.reduce_mean((qc_backup - qc1)**2)
+    qc2_loss = 0.5 * tf.reduce_mean((qc_backup - qc2) ** 2)
+    q_loss = qr1_loss + qr2_loss + qc1_loss+ qc2_loss
 
     # Loss for alpha
     entropy_constraint *= act_dim
@@ -364,7 +370,7 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
     print('using entropy constraint', entropy_constraint)
 
     # Loss for beta
-    if use_costs:
+    if use_costs and not fixed_cost_penalty:
         if cost_constraint is None:
             # Convert assuming equal cost accumulated each step
             # Note this isn't the case, since the early in episode doesn't usually have cost,
@@ -373,8 +379,8 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
             # It's worth checking empirical total undiscounted costs to see if they match.
             cost_constraint = cost_lim * (1 - gamma ** max_ep_len) / (1 - gamma) / max_ep_len
         print('using cost constraint', cost_constraint)
-        beta_loss = beta * (cost_constraint - qc)
-
+        beta_loss = beta * (cost_constraint - qc1)
+        #TODO: What is the correct target here?
     # Policy train op
     # (has to be separate from value train op, because qr1_pi appears in pi_loss)
     train_pi_op = MpiAdamOptimizer(learning_rate=lr).minimize(pi_loss, var_list=get_vars('main/pi'), name='train_pi')
@@ -419,7 +425,7 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
 
     # Setup model saving
     logger.setup_tf_saver(sess, inputs={'x': x_ph, 'a': a_ph},
-                                outputs={'mu': mu, 'pi': pi, 'qr1': qr1, 'qr2': qr2, 'qc': qc})
+                                outputs={'mu': mu, 'pi': pi, 'qr1': qr1, 'qr2': qr2, 'qc1': qc1, 'qc2': qc2})
 
     def get_action(o, deterministic=False):
         act_op = mu if deterministic else pi
@@ -444,10 +450,10 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
     total_steps = steps_per_epoch * epochs
 
     # variables to measure in an update
-    vars_to_get = dict(LossPi=pi_loss, LossQR1=qr1_loss, LossQR2=qr2_loss, LossQC=qc_loss,
-                       QR1Vals=qr1, QR2Vals=qr2, QCVals=qc, LogPi=logp_pi, PiEntropy=pi_entropy,
+    vars_to_get = dict(LossPi=pi_loss, LossQR1=qr1_loss, LossQR2=qr2_loss, LossQC1=qc1_loss, LossQC2=qc2_loss,
+                       QR1Vals=qr1, QR2Vals=qr2, QC1Vals=qc1, QC2Vals=qc2 , LogPi=logp_pi, PiEntropy=pi_entropy,
                        Alpha=alpha, LogAlpha=log_alpha, LossAlpha=alpha_loss)
-    if use_costs:
+    if use_costs and not fixed_cost_penalty:
         vars_to_get.update(dict(Beta=beta, LogBeta=log_beta, LossBeta=beta_loss))
 
     print('starting training', proc_id())
@@ -539,16 +545,18 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
             logger.log_tabular('TotalEnvInteracts', mpi_sum(local_steps))
             logger.log_tabular('QR1Vals', with_min_and_max=True)
             logger.log_tabular('QR2Vals', with_min_and_max=True)
-            logger.log_tabular('QCVals', with_min_and_max=True)
+            logger.log_tabular('QC1Vals', with_min_and_max=True)
+            logger.log_tabular('QC2Vals', with_min_and_max=True)
             logger.log_tabular('LogPi', with_min_and_max=True)
             logger.log_tabular('LossPi', average_only=True)
             logger.log_tabular('LossQR1', average_only=True)
             logger.log_tabular('LossQR2', average_only=True)
-            logger.log_tabular('LossQC', average_only=True)
+            logger.log_tabular('LossQC1', average_only=True)
+            logger.log_tabular('LossQC2', average_only=True)
             logger.log_tabular('LossAlpha', average_only=True)
             logger.log_tabular('LogAlpha', average_only=True)
             logger.log_tabular('Alpha', average_only=True)
-            if use_costs:
+            if use_costs and not fixed_cost_penalty:
                 logger.log_tabular('LossBeta', average_only=True)
                 logger.log_tabular('LogBeta', average_only=True)
                 logger.log_tabular('Beta', average_only=True)
