@@ -155,7 +155,7 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
         update_freq=1, render=False, 
         fixed_entropy_bonus=None, entropy_constraint=-1.0,
         fixed_cost_penalty=None, cost_constraint=None, cost_lim=None,
-        reward_scale=1,
+        reward_scale=1,penalty_lr=5e-2
         ):
     """
 
@@ -395,7 +395,7 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
             train_entreg_op = entreg_optimizer.minimize(alpha_loss, var_list=get_vars('entreg'))
 
     if use_costs and fixed_cost_penalty is None:
-        costpen_optimizer = MpiAdamOptimizer(learning_rate=lr)
+        costpen_optimizer = MpiAdamOptimizer(learning_rate=penalty_lr)
         with tf.control_dependencies([train_entreg_op]):
             train_costpen_op = costpen_optimizer.minimize(beta_loss, var_list=get_vars('costpen'))
 
@@ -410,7 +410,7 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
     if fixed_entropy_bonus is None:
         grouped_update = tf.group([grouped_update, train_entreg_op])
     if use_costs and fixed_cost_penalty is None:
-        grouped_update = tf.group([grouped_update, train_costpen_op])
+        grouped_update_a = tf.group([grouped_update, train_costpen_op])
 
     # Initializing targets to match main variables
     # As a shortcut, use our exponential moving average update w/ coefficient zero
@@ -513,8 +513,12 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
                 if t < local_update_after:
                     logger.store(**sess.run(vars_to_get, feed_dict))
                 else:
-                    values, _ = sess.run([vars_to_get, grouped_update], feed_dict)
-                    logger.store(**values)
+                    if (not j==update_freq-1) or not (use_costs and not fixed_cost_penalty):
+                        values, _ = sess.run([vars_to_get, grouped_update], feed_dict)
+                        logger.store(**values)
+                    else:
+                        values, _ = sess.run([vars_to_get, grouped_update_a], feed_dict)
+                        logger.store(**values)
 
         # End of epoch wrap-up
         if t > 0 and t % local_steps_per_epoch == 0:
@@ -589,6 +593,7 @@ if __name__ == '__main__':
     parser.add_argument('--fixed_cost_penalty', default=None, type=float)
     parser.add_argument('--cost_constraint', type=float, default=None)
     parser.add_argument('--cost_lim', type=float, default=None)
+    parser.add_argument('--penalty_lr', type=float, default=5e-2)
     args = parser.parse_args()
 
     try:
@@ -608,5 +613,5 @@ if __name__ == '__main__':
         update_freq=args.update_freq, lr=args.lr, render=args.render,
         local_start_steps=args.local_start_steps, local_update_after=args.local_update_after,
         fixed_entropy_bonus=args.fixed_entropy_bonus, entropy_constraint=args.entropy_constraint,
-        fixed_cost_penalty=args.fixed_cost_penalty, cost_constraint=args.cost_constraint,cost_lim=args.cost_lim
+        fixed_cost_penalty=args.fixed_cost_penalty, cost_constraint=args.cost_constraint,cost_lim=args.cost_lim,penalty_lr=args.penalty_lr
         )
