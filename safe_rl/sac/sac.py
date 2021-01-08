@@ -608,5 +608,5 @@ if __name__ == '__main__':
         update_freq=args.update_freq, lr=args.lr, render=args.render,
         local_start_steps=args.local_start_steps, local_update_after=args.local_update_after,
         fixed_entropy_bonus=args.fixed_entropy_bonus, entropy_constraint=args.entropy_constraint,
-        fixed_cost_penalty=args.fixed_cost_penalty, cost_constraint=args.cost_constraint,
+        fixed_cost_penalty=args.fixed_cost_penalty, cost_constraint=args.cost_constraint,cost_lim=args.cost_lim
         )
