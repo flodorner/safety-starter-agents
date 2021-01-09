@@ -355,7 +355,7 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
     qc_backup = tf.stop_gradient(c_ph + gamma*(1-d_ph)*max_qc_pi_targ)
 
     # Soft actor-critic losses
-    pi_loss = tf.reduce_mean(alpha * logp_pi - min_q_pi + beta * max_qc_pi)
+    pi_loss = tf.reduce_mean(alpha * logp_pi - min_q_pi + beta * max_qc_pi)/(1+beta)
     qr1_loss = 0.5 * tf.reduce_mean((q_backup - qr1)**2)
     qr2_loss = 0.5 * tf.reduce_mean((q_backup - qr2)**2)
     qc1_loss = 0.5 * tf.reduce_mean((qc_backup - qc1)**2)
