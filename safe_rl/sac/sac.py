@@ -148,14 +148,14 @@ class ReplayBuffer:
 """
 Soft Actor-Critic
 """
-def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed=0,
+def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic , ac_kwargs=dict(), seed=0,
         steps_per_epoch=1000, epochs=100, replay_size=int(1e6), gamma=0.99,
         polyak=0.995, lr=1e-4, batch_size=1024, local_start_steps=int(1e3),
         max_ep_len=1000, logger_kwargs=dict(), save_freq=10, local_update_after=int(1e3),
         update_freq=1, render=False, 
         fixed_entropy_bonus=None, entropy_constraint=-1.0,
         fixed_cost_penalty=None, cost_constraint=None, cost_lim=None,
-        reward_scale=1,penalty_lr=5e-2
+        reward_scale=1,penalty_lr=5e-2,use_discor=False
         ):
     """
 
@@ -291,6 +291,11 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
         qr2, qr2_pi = critic_fn(x_ph, a_ph, pi, name='qr2', **ac_kwargs)
         qc1, qc1_pi = critic_fn(x_ph, a_ph, pi, name='qc1', **ac_kwargs)
         qc2, qc2_pi = critic_fn(x_ph, a_ph, pi, name='qc2', **ac_kwargs)
+        er1, er1_targ = critic_fn(x_ph, a_ph, pi,  name='er1', **ac_kwargs)
+        er2, er2_targ = critic_fn(x_ph, a_ph, pi,  name='er2', **ac_kwargs)
+        ec1, ec1_targ = critic_fn(x_ph, a_ph, pi,  name='ec1', **ac_kwargs)
+        ec2, ec2_targ = critic_fn(x_ph, a_ph, pi, name='ec2', **ac_kwargs)
+
 
     with tf.variable_scope('main', reuse=True):
         # Additional policy output from a different observation placeholder
@@ -304,6 +309,11 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
         _, qr2_pi_targ = critic_fn(x2_ph, a_ph, pi2, name='qr2', **ac_kwargs)
         _, qc1_pi_targ = critic_fn(x2_ph, a_ph, pi2, name='qc1', **ac_kwargs)
         _, qc2_pi_targ = critic_fn(x2_ph, a_ph, pi2, name='qc2', **ac_kwargs)
+
+        _, er1_pi_targ = critic_fn(x_ph, a_ph, pi, name='er1', **ac_kwargs)
+        _, er2_pi_targ = critic_fn(x_ph, a_ph, pi, name='er2', **ac_kwargs)
+        _, ec1_pi_targ = critic_fn(x_ph, a_ph, pi, name='ec1', **ac_kwargs)
+        _, ec2_pi_targ = critic_fn(x_ph, a_ph, pi, name='ec2', **ac_kwargs)
 
     # Entropy bonus
     if fixed_entropy_bonus is None:
@@ -334,6 +344,26 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
         beta = 0.0  # costs do not contribute to policy optimization
         print('Not using costs')
 
+    if use_discor:
+        with tf.variable_scope('discor'):
+            tr1 = tf.get_variable('tr1',
+                                         initializer=10,
+                                         trainable=False,
+                                         dtype=tf.float32)
+            tr2 = tf.get_variable('tr2',
+                                         initializer=10,
+                                         trainable=False,
+                                         dtype=tf.float32)
+            tc1 = tf.get_variable('tc1',
+                                         initializer=10,
+                                         trainable=False,
+                                         dtype=tf.float32)
+            tc2 = tf.get_variable('tc2',
+                                         initializer=10,
+                                         trainable=False,
+                                         dtype=tf.float32)
+
+
     # Experience buffer
     replay_buffer = ReplayBuffer(obs_dim=obs_dim, act_dim=act_dim, size=replay_size)
 
@@ -354,13 +384,37 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
     q_backup = tf.stop_gradient(r_ph + gamma*(1-d_ph)*(min_q_pi_targ - alpha * logp_pi2))
     qc_backup = tf.stop_gradient(c_ph + gamma*(1-d_ph)*max_qc_pi_targ)
 
+    if use_discor:
+        er1_backup = tf.stop_gradient(tf.abs(qr1 - q_backup) + gamma*(1-d_ph)* er1_pi_targ)
+        er2_backup = tf.stop_gradient(tf.abs(qr2 - q_backup) + gamma*(1-d_ph)* er2_pi_targ)
+        ec1_backup = tf.stop_gradient(tf.abs(qc1 - qc_backup) + gamma*(1-d_ph)* ec1_pi_targ)
+        ec2_backup = tf.stop_gradient(tf.abs(qc2 - qc_backup) + gamma*(1-d_ph)* ec2_pi_targ)
+
+        qr1_loss = 0.5 * tf.reduce_mean(tf.nn.softmax(er1_backup / tr1) * (q_backup - qr1) ** 2)
+        qr2_loss = 0.5 * tf.reduce_mean(tf.nn.softmax(er2_backup / tr2) * (q_backup - qr2) ** 2)
+        qc1_loss = 0.5 * tf.reduce_mean(tf.nn.softmax(ec1_backup / tc1) * (qc_backup - qc1) ** 2)
+        qc2_loss = 0.5 * tf.reduce_mean(tf.nn.softmax(ec2_backup / tc2) * (qc_backup - qc2) ** 2)
+
+    else:
+        qr1_loss = 0.5 * tf.reduce_mean((q_backup - qr1) ** 2)
+        qr2_loss = 0.5 * tf.reduce_mean((q_backup - qr2) ** 2)
+        qc1_loss = 0.5 * tf.reduce_mean((qc_backup - qc1) ** 2)
+        qc2_loss = 0.5 * tf.reduce_mean((qc_backup - qc2) ** 2)
     # Soft actor-critic losses
-    pi_loss = tf.reduce_mean(alpha * logp_pi - min_q_pi + beta * max_qc_pi)/(1+beta)
-    qr1_loss = 0.5 * tf.reduce_mean((q_backup - qr1)**2)
-    qr2_loss = 0.5 * tf.reduce_mean((q_backup - qr2)**2)
-    qc1_loss = 0.5 * tf.reduce_mean((qc_backup - qc1)**2)
-    qc2_loss = 0.5 * tf.reduce_mean((qc_backup - qc2) ** 2)
     q_loss = qr1_loss + qr2_loss + qc1_loss+ qc2_loss
+    pi_loss = tf.reduce_mean(alpha * logp_pi - min_q_pi + beta * max_qc_pi)/(1+beta)
+
+    if use_discor:
+        er1_loss = 0.5 * tf.reduce_mean((er1_backup - er1) ** 2)
+        er2_loss = 0.5 * tf.reduce_mean((er2_backup - er2) ** 2)
+        ec1_loss = 0.5 * tf.reduce_mean((ec1_backup - ec1) ** 2)
+        ec2_loss = 0.5 * tf.reduce_mean((ec2_backup - ec2) ** 2)
+        error_loss = er1_loss + er2_loss + ec1_loss + ec2_loss
+        er1_mean = tf.reduce_mean(er1)
+        er2_mean = tf.reduce_mean(er2)
+        ec1_mean = tf.reduce_mean(ec1)
+        ec2_mean = tf.reduce_mean(ec2)
+
 
     # Loss for alpha
     entropy_constraint *= act_dim
@@ -388,16 +442,22 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
     # Value train op
     with tf.control_dependencies([train_pi_op]):
         train_q_op = MpiAdamOptimizer(learning_rate=lr).minimize(q_loss, var_list=get_vars('main/q'), name='train_q')
-
+    with tf.control_dependencies([train_q_op]):
+        if use_discor:
+            train_e_op = MpiAdamOptimizer(learning_rate=lr).minimize(error_loss, var_list=get_vars('main/e'),name='train_e')
+            with tf.control_dependencies([train_e_op]):
+                train_e_out_op = tf.group([tf.assign(tr1, er1_mean),tf.assign(tr2, er2_mean),tf.assign(tc1, ec1_mean),tf.assign(tc2, ec2_mean)])
+        else:
+            train_e_out_op=tf.no_op
     if fixed_entropy_bonus is None:
         entreg_optimizer = MpiAdamOptimizer(learning_rate=lr)
-        with tf.control_dependencies([train_q_op]):
+        with tf.control_dependencies([train_e_out_op]):
             train_entreg_op = entreg_optimizer.minimize(alpha_loss, var_list=get_vars('entreg'))
-
     if use_costs and fixed_cost_penalty is None:
         costpen_optimizer = MpiAdamOptimizer(learning_rate=penalty_lr)
         with tf.control_dependencies([train_entreg_op]):
             train_costpen_op = costpen_optimizer.minimize(beta_loss, var_list=get_vars('costpen'))
+
 
     # Polyak averaging for target variables
     target_update = get_target_update('main', 'target', polyak)
@@ -405,12 +465,19 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
     # Single monolithic update with explicit control dependencies
     with tf.control_dependencies([train_pi_op]):
         with tf.control_dependencies([train_q_op]):
-            grouped_update = tf.group([target_update])
+            if use_discor:
+                with tf.control_dependencies([train_e_op]):
+                    with tf.control_dependencies([train_e_out_op]):
+                        grouped_update = tf.group([target_update])
+            else:
+                grouped_update = tf.group([target_update])
 
     if fixed_entropy_bonus is None:
         grouped_update = tf.group([grouped_update, train_entreg_op])
     if use_costs and fixed_cost_penalty is None:
         grouped_update_a = tf.group([grouped_update, train_costpen_op])
+
+
 
     # Initializing targets to match main variables
     # As a shortcut, use our exponential moving average update w/ coefficient zero
@@ -452,7 +519,7 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
     # variables to measure in an update
     vars_to_get = dict(LossPi=pi_loss, LossQR1=qr1_loss, LossQR2=qr2_loss, LossQC1=qc1_loss, LossQC2=qc2_loss,
                        QR1Vals=qr1, QR2Vals=qr2, QC1Vals=qc1, QC2Vals=qc2 , LogPi=logp_pi, PiEntropy=pi_entropy,
-                       Alpha=alpha, LogAlpha=log_alpha, LossAlpha=alpha_loss)
+                       Alpha=alpha, LogAlpha=log_alpha, LossAlpha=alpha_loss,TR1=tr1)
     if use_costs and not fixed_cost_penalty:
         vars_to_get.update(dict(Beta=beta, LogBeta=log_beta, LossBeta=beta_loss))
 
@@ -564,6 +631,8 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic, ac_kwargs=dict(), seed
                 logger.log_tabular('LossBeta', average_only=True)
                 logger.log_tabular('LogBeta', average_only=True)
                 logger.log_tabular('Beta', average_only=True)
+            if use_discor:
+                logger.log_tabular('TR1', average_only=True)
             logger.log_tabular('PiEntropy', average_only=True)
             logger.log_tabular('TestTime', average_only=True)
             logger.log_tabular('EpochTime', average_only=True)
