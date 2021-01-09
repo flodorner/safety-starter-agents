@@ -447,7 +447,8 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic , ac_kwargs=dict(), see
         if use_discor:
             train_e_op = MpiAdamOptimizer(learning_rate=lr).minimize(error_loss, var_list=get_vars('main/e'),name='train_e')
             with tf.control_dependencies([train_e_op]):
-                train_e_out_op = tf.group([tf.assign(tr1, er1_mean),tf.assign(tr2, er2_mean),tf.assign(tc1, ec1_mean),tf.assign(tc2, ec2_mean)])
+                train_e_out_op = tf.group([tf.assign(tr1, polyak*er1_mean+(1-polyak)*tr1),tf.assign(tr2, polyak*er2_mean+(1-polyak)*tr2),
+                                           tf.assign(tc1, polyak*ec1_mean+(1-polyak)*tc1),tf.assign(tc2, polyak*ec2_mean+(1-polyak)*tc2)])
         else:
             train_e_out_op=tf.no_op()
     if fixed_entropy_bonus is None:
