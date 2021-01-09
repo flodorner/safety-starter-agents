@@ -448,7 +448,7 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic , ac_kwargs=dict(), see
             with tf.control_dependencies([train_e_op]):
                 train_e_out_op = tf.group([tf.assign(tr1, er1_mean),tf.assign(tr2, er2_mean),tf.assign(tc1, ec1_mean),tf.assign(tc2, ec2_mean)])
         else:
-            train_e_out_op=tf.no_op
+            train_e_out_op=tf.no_op()
     if fixed_entropy_bonus is None:
         entreg_optimizer = MpiAdamOptimizer(learning_rate=lr)
         with tf.control_dependencies([train_e_out_op]):
@@ -519,9 +519,11 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic , ac_kwargs=dict(), see
     # variables to measure in an update
     vars_to_get = dict(LossPi=pi_loss, LossQR1=qr1_loss, LossQR2=qr2_loss, LossQC1=qc1_loss, LossQC2=qc2_loss,
                        QR1Vals=qr1, QR2Vals=qr2, QC1Vals=qc1, QC2Vals=qc2 , LogPi=logp_pi, PiEntropy=pi_entropy,
-                       Alpha=alpha, LogAlpha=log_alpha, LossAlpha=alpha_loss,TR1=tr1)
+                       Alpha=alpha, LogAlpha=log_alpha, LossAlpha=alpha_loss)
     if use_costs and not fixed_cost_penalty:
         vars_to_get.update(dict(Beta=beta, LogBeta=log_beta, LossBeta=beta_loss))
+    if use_discor:
+        vars_to_get.update(dict(TR1=tr1))
 
     print('starting training', proc_id())
 
@@ -663,6 +665,7 @@ if __name__ == '__main__':
     parser.add_argument('--cost_constraint', type=float, default=None)
     parser.add_argument('--cost_lim', type=float, default=None)
     parser.add_argument('--penalty_lr', type=float, default=5e-2)
+    parser.add_argument('--use_discor', default=False, action='store_true')
     args = parser.parse_args()
 
     try:
@@ -682,5 +685,5 @@ if __name__ == '__main__':
         update_freq=args.update_freq, lr=args.lr, render=args.render,
         local_start_steps=args.local_start_steps, local_update_after=args.local_update_after,
         fixed_entropy_bonus=args.fixed_entropy_bonus, entropy_constraint=args.entropy_constraint,
-        fixed_cost_penalty=args.fixed_cost_penalty, cost_constraint=args.cost_constraint,cost_lim=args.cost_lim,penalty_lr=args.penalty_lr
+        fixed_cost_penalty=args.fixed_cost_penalty, cost_constraint=args.cost_constraint,cost_lim=args.cost_lim,penalty_lr=args.penalty_lr,use_discor=args.use_discor
         )
