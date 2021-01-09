@@ -291,10 +291,11 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic , ac_kwargs=dict(), see
         qr2, qr2_pi = critic_fn(x_ph, a_ph, pi, name='qr2', **ac_kwargs)
         qc1, qc1_pi = critic_fn(x_ph, a_ph, pi, name='qc1', **ac_kwargs)
         qc2, qc2_pi = critic_fn(x_ph, a_ph, pi, name='qc2', **ac_kwargs)
-        er1, er1_targ = critic_fn(x_ph, a_ph, pi,  name='er1', **ac_kwargs)
-        er2, er2_targ = critic_fn(x_ph, a_ph, pi,  name='er2', **ac_kwargs)
-        ec1, ec1_targ = critic_fn(x_ph, a_ph, pi,  name='ec1', **ac_kwargs)
-        ec2, ec2_targ = critic_fn(x_ph, a_ph, pi, name='ec2', **ac_kwargs)
+        if use_discor:
+            er1, er1_targ = critic_fn(x_ph, a_ph, pi,  name='er1', **ac_kwargs)
+            er2, er2_targ = critic_fn(x_ph, a_ph, pi,  name='er2', **ac_kwargs)
+            ec1, ec1_targ = critic_fn(x_ph, a_ph, pi,  name='ec1', **ac_kwargs)
+            ec2, ec2_targ = critic_fn(x_ph, a_ph, pi, name='ec2', **ac_kwargs)
 
 
     with tf.variable_scope('main', reuse=True):
@@ -309,11 +310,11 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic , ac_kwargs=dict(), see
         _, qr2_pi_targ = critic_fn(x2_ph, a_ph, pi2, name='qr2', **ac_kwargs)
         _, qc1_pi_targ = critic_fn(x2_ph, a_ph, pi2, name='qc1', **ac_kwargs)
         _, qc2_pi_targ = critic_fn(x2_ph, a_ph, pi2, name='qc2', **ac_kwargs)
-
-        _, er1_pi_targ = critic_fn(x_ph, a_ph, pi, name='er1', **ac_kwargs)
-        _, er2_pi_targ = critic_fn(x_ph, a_ph, pi, name='er2', **ac_kwargs)
-        _, ec1_pi_targ = critic_fn(x_ph, a_ph, pi, name='ec1', **ac_kwargs)
-        _, ec2_pi_targ = critic_fn(x_ph, a_ph, pi, name='ec2', **ac_kwargs)
+        if use_discor:
+            _, er1_pi_targ = critic_fn(x_ph, a_ph, pi, name='er1', **ac_kwargs)
+            _, er2_pi_targ = critic_fn(x_ph, a_ph, pi, name='er2', **ac_kwargs)
+            _, ec1_pi_targ = critic_fn(x_ph, a_ph, pi, name='ec1', **ac_kwargs)
+            _, ec2_pi_targ = critic_fn(x_ph, a_ph, pi, name='ec2', **ac_kwargs)
 
     # Entropy bonus
     if fixed_entropy_bonus is None:
@@ -347,19 +348,19 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic , ac_kwargs=dict(), see
     if use_discor:
         with tf.variable_scope('discor'):
             tr1 = tf.get_variable('tr1',
-                                         initializer=10,
+                                         initializer=10.0,
                                          trainable=False,
                                          dtype=tf.float32)
             tr2 = tf.get_variable('tr2',
-                                         initializer=10,
+                                         initializer=10.0,
                                          trainable=False,
                                          dtype=tf.float32)
             tc1 = tf.get_variable('tc1',
-                                         initializer=10,
+                                         initializer=10.0,
                                          trainable=False,
                                          dtype=tf.float32)
             tc2 = tf.get_variable('tc2',
-                                         initializer=10,
+                                         initializer=10.0,
                                          trainable=False,
                                          dtype=tf.float32)
 
