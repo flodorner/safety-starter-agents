@@ -391,10 +391,10 @@ def sac(env_fn, actor_fn=mlp_actor, critic_fn=mlp_critic , ac_kwargs=dict(), see
         ec1_backup = tf.stop_gradient(tf.abs(qc1 - qc_backup) + gamma*(1-d_ph)* ec1_pi_targ)
         ec2_backup = tf.stop_gradient(tf.abs(qc2 - qc_backup) + gamma*(1-d_ph)* ec2_pi_targ)
 
-        qr1_loss = 0.5 * tf.reduce_sum(tf.nn.softmax(er1_backup / tr1) * (q_backup - qr1) ** 2)
-        qr2_loss = 0.5 * tf.reduce_sum(tf.nn.softmax(er2_backup / tr2) * (q_backup - qr2) ** 2)
-        qc1_loss = 0.5 * tf.reduce_sum(tf.nn.softmax(ec1_backup / tc1) * (qc_backup - qc1) ** 2)
-        qc2_loss = 0.5 * tf.reduce_sum(tf.nn.softmax(ec2_backup / tc2) * (qc_backup - qc2) ** 2)
+        qr1_loss = 0.5 * tf.reduce_sum(tf.nn.softmax(er1_backup / tr1,axis=0) * (q_backup - qr1) ** 2)
+        qr2_loss = 0.5 * tf.reduce_sum(tf.nn.softmax(er2_backup / tr2,axis=0) * (q_backup - qr2) ** 2)
+        qc1_loss = 0.5 * tf.reduce_sum(tf.nn.softmax(ec1_backup / tc1,axis=0) * (qc_backup - qc1) ** 2)
+        qc2_loss = 0.5 * tf.reduce_sum(tf.nn.softmax(ec2_backup / tc2,axis=0) * (qc_backup - qc2) ** 2)
 
     else:
         qr1_loss = 0.5 * tf.reduce_mean((q_backup - qr1) ** 2)
