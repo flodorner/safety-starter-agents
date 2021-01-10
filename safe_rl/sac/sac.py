@@ -118,11 +118,10 @@ def mlp_critic_act_transform(x, a, pi, name, hidden_sizes=(256,256), activation=
                                        activation=activation,
                                        output_activation=None),
                                    axis=1)
-    fn_mlp_2 = lambda x : tf.squeeze(mlp(x=x,
+    fn_mlp_2 = lambda x : mlp(x=x,
                                        hidden_sizes=[64,64,1],
                                        activation=activation,
-                                       output_activation=None),
-                                   axis=1)
+                                       output_activation=None)
 
     with tf.variable_scope(name):
         critic = fn_mlp(tf.concat([x,fn_mlp_2(a)], axis=-1))
@@ -722,7 +721,7 @@ if __name__ == '__main__':
     from safe_rl.utils.run_utils import setup_logger_kwargs
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
 
-    if args.use_act_trans:
+    if not args.use_act_trans:
         critic=mlp_critic
     else:
         critic=mlp_critic_act_transform
