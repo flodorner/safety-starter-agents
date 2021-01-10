@@ -110,6 +110,27 @@ def mlp_critic(x, a, pi, name, hidden_sizes=(256,256), activation=tf.nn.relu,
 
     return critic, critic_pi
 
+def mlp_critic_act_transform(x, a, pi, name, hidden_sizes=(256,256), activation=tf.nn.relu,
+               output_activation=None, policy=mlp_gaussian_policy, action_space=None):
+
+    fn_mlp = lambda x : tf.squeeze(mlp(x=x,
+                                       hidden_sizes=list(hidden_sizes)+[1],
+                                       activation=activation,
+                                       output_activation=None),
+                                   axis=1)
+    fn_mlp_2 = lambda x : tf.squeeze(mlp(x=x,
+                                       hidden_sizes=[64,64,1],
+                                       activation=activation,
+                                       output_activation=None),
+                                   axis=1)
+
+    with tf.variable_scope(name):
+        critic = fn_mlp(tf.concat([x,fn_mlp_2(a)], axis=-1))
+
+    with tf.variable_scope(name, reuse=True):
+        critic_pi = fn_mlp(tf.concat([x,fn_mlp_2(pi)], axis=-1))
+
+    return critic, critic_pi
 
 class ReplayBuffer:
     """
@@ -688,6 +709,7 @@ if __name__ == '__main__':
     parser.add_argument('--penalty_lr', type=float, default=5e-2)
     parser.add_argument('--use_discor', default=False, action='store_true')
     parser.add_argument('--cost_maxq', default=False, action='store_true')
+    parser.add_argument('--use_act_trans', default=False, action='store_true')
     args = parser.parse_args()
 
     try:
@@ -700,7 +722,12 @@ if __name__ == '__main__':
     from safe_rl.utils.run_utils import setup_logger_kwargs
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
 
-    sac(lambda : gym.make(args.env), actor_fn=mlp_actor, critic_fn=mlp_critic,
+    if args.use_act_trans:
+        critic=mlp_critic
+    else:
+        critic=mlp_critic_act_transform
+
+    sac(lambda : gym.make(args.env), actor_fn=mlp_actor, critic_fn=critic,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l),
         gamma=args.gamma, seed=args.seed, epochs=args.epochs, batch_size=args.batch_size,
         logger_kwargs=logger_kwargs, steps_per_epoch=args.steps_per_epoch,
